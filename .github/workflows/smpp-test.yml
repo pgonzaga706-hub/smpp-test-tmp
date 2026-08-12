@@ -1,15 +1,15 @@
-name: EMAG Phase 6
+name: EMAG Phase 7
 on:
   workflow_dispatch:
   push:
     branches: [main]
 
 jobs:
-  phase6:
+  phase7:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: EMAG Phase 6
+      - name: EMAG Phase 7
         run: |
           python3 - << 'PYEOF'
           import urllib.request, urllib.error, json, ssl, time
@@ -17,46 +17,96 @@ jobs:
           ctx.check_hostname = False
           ctx.verify_mode = ssl.CERT_NONE
           BASE = "https://ess.emag.verizonwireless.com"
+          SSO = "https://sso.verizonenterprise.com"
+          MB = "https://mblogin.verizonwireless.com"
           
-          def get(url, headers=None, maxbytes=16384):
+          def get(url, headers=None, maxbytes=32768, follow=False):
               h = {"User-Agent": "Mozilla/5.0"}
               if headers: h.update(headers)
               rq = urllib.request.Request(url, headers=h)
               try:
-                  op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+                  if follow:
+                      op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+                  else:
+                      op = urllib.request.build_opener(
+                          urllib.request.HTTPSHandler(context=ctx),
+                          urllib.request.HTTPErrorProcessor()
+                      )
+                      op.addheaders = []
                   with op.open(rq, timeout=15) as r:
                       ct = r.headers.get("Content-Type","")
+                      loc = r.headers.get("Location","")
                       rb = r.read(maxbytes).decode("utf-8", errors="replace")
-                      return r.status, ct, rb
+                      return r.status, ct, rb, loc
               except urllib.error.HTTPError as e:
-                  return e.code, "", e.read(512).decode("utf-8", errors="replace")
+                  ct = e.headers.get("Content-Type","")
+                  loc = e.headers.get("Location","")
+                  return e.code, ct, e.read(2048).decode("utf-8", errors="replace"), loc
               except Exception as e:
-                  return 0, "", str(e)
+                  return 0, "", str(e), ""
           
-          print("=== Full login HTML (32KB) ===")
-          s, ct, b = get(BASE + "/emag/", maxbytes=32768)
+          print("=== /auth/sso/login endpoint ===")
+          for method_url in [
+              ("GET", BASE + "/auth/sso/login"),
+              ("GET", BASE + "/auth/sso/login?goto=/"),
+              ("GET", BASE + "/auth/sso/login?code=test"),
+              ("GET", BASE + "/emag/auth/business/login"),
+              ("GET", BASE + "/emag/auth/sso/login"),
+          ]:
+              method, url = method_url
+              rq = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
+              try:
+                  op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+                  with op.open(rq, timeout=10) as r:
+                      ct = r.headers.get("Content-Type","")
+                      loc = r.headers.get("Location","")
+                      b = r.read(1024).decode("utf-8", errors="replace")
+                      print(f"[{r.status}] {url}: ct={ct[:20]} loc={loc[:80]} body={b[:100]}")
+              except urllib.error.HTTPError as e:
+                  loc = e.headers.get("Location","")
+                  print(f"[{e.code}] {url}: loc={loc[:100]} body={e.read(200).decode(errors="replace")[:80]}")
+              except Exception as e:
+                  print(f"[ERR] {url}: {e}")
+          
+          print()
+          print("=== landing.js ===")
+          s, ct, b, loc = get(BASE + "/emag/assets/js/open/landing.js")
           print(f"[{s}] {len(b)} chars")
           print(b)
           
           print()
-          print("=== EMAG JavaScript files ===")
-          js_paths = [
-              "/emag/assets/js/backbone-concat.js",
-              "/emag/assets/js/app.js",
-              "/emag/assets/js/main.js",
-              "/emag/assets/js/emag.js",
-              "/emag/assets/js/emag-app.js",
-              "/emag/assets/js/bundle.js",
-              "/emag/assets/js/vendor.js",
-              "/emag/assets/js/router.js",
-              "/emag/assets/js/routes.js",
-          ]
-          for path in js_paths:
-              s, ct, b = get(BASE + path, maxbytes=2048)
-              if s == 200:
-                  print(f"[{s}] FOUND {path} ({len(b)} chars): {b[:500]}")
-              else:
-                  print(f"[{s}] {path}")
+          print("=== landing_services.js ===")
+          s, ct, b, loc = get(BASE + "/emag/assets/js/open/landing_services.js")
+          print(f"[{s}] {len(b)} chars")
+          print(b)
+          
+          print()
+          print("=== CSS files for API clues ===")
+          for path in [
+              "/emag/assets/css/emag-modern.css",
+              "/emag/assets/css/backbone-concat.css",
+          ]:
+              s, ct, b, loc = get(BASE + path, maxbytes=4096)
+              print(f"[{s}] {path} ({len(b)} chars): {b[:200]}")
+          
+          print()
+          print("=== mblogin EMAG auth endpoint ===")
+          for url in [
+              MB + "/account/emag/auth/business",
+              MB + "/account/emag/auth/business?goto=https://ess.emag.verizonwireless.com/auth/sso/login",
+          ]:
+              rq = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+              try:
+                  op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+                  with op.open(rq, timeout=10) as r:
+                      loc = r.headers.get("Location","")
+                      b = r.read(512).decode("utf-8", errors="replace")
+                      print(f"[{r.status}] {url}: loc={loc[:100]} body={b[:100]}")
+              except urllib.error.HTTPError as e:
+                  loc = e.headers.get("Location","")
+                  print(f"[{e.code}] loc={loc[:100]} body={e.read(200).decode(errors="replace")[:100]}")
+              except Exception as e:
+                  print(f"[ERR] {e}")
           
           print("DONE")
           PYEOF
