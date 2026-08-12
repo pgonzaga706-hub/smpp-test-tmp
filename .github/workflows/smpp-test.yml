@@ -1,15 +1,15 @@
-name: EMAG Phase 9
+name: EMAG Phase 10
 on:
   workflow_dispatch:
   push:
     branches: [main]
 
 jobs:
-  phase9:
+  phase10:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: EMAG Phase 9
+      - name: EMAG Phase 10
         run: |
           python3 - << 'PYEOF'
           import urllib.request, urllib.error, json, ssl, re
@@ -18,65 +18,65 @@ jobs:
           ctx.verify_mode = ssl.CERT_NONE
           BASE = "https://ess.emag.verizonwireless.com"
           
-          def get(url, maxbytes=65536):
+          def get_with_headers(url, maxbytes=65536):
               rq = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
               try:
                   op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
                   with op.open(rq, timeout=15) as r:
-                      return r.status, r.read(maxbytes).decode("utf-8", errors="replace")
+                      hdrs = dict(r.headers)
+                      body = r.read(maxbytes).decode("utf-8", errors="replace")
+                      return r.status, hdrs, body
               except urllib.error.HTTPError as e:
-                  return e.code, e.read(512).decode("utf-8", errors="replace")
+                  return e.code, dict(e.headers), e.read(512).decode("utf-8", errors="replace")
               except Exception as e:
-                  return 0, str(e)
+                  return 0, {}, str(e)
           
-          print("=== emag-modern.css - extract all URLs ===")
-          s, b = get(BASE + "/emag/assets/css/emag-modern.css")
-          print(f"Size: {len(b)} chars")
-          # Find all asset URLs
-          url_pat = r"/emag/assets/[a-zA-Z0-9/._-]+"
-          found_urls = list(set(re.findall(url_pat, b)))
-          found_urls.sort()
-          print(f"Asset URLs in CSS ({len(found_urls)}):")
-          for u in found_urls:
+          print("=== EMAG main page headers ===")
+          s, hdrs, b = get_with_headers(BASE + "/emag/")
+          for k, v in hdrs.items():
+              if k.lower() in ["content-security-policy", "x-frame-options", "x-content-type-options",
+                               "strict-transport-security", "x-xss-protection", "server",
+                               "x-powered-by", "set-cookie", "content-type"][:]:
+                  print(f"  {k}: {v}")
+          
+          print()
+          print("=== landing.js full content ===")
+          s, hdrs, b = get_with_headers(BASE + "/emag/assets/js/open/landing.js")
+          print(f"Status: {s} Size: {len(b)}")
+          print(b)
+          
+          print()
+          print("=== landing_services.js full content ===")
+          s, hdrs, b = get_with_headers(BASE + "/emag/assets/js/open/landing_services.js")
+          print(f"Status: {s} Size: {len(b)}")
+          print(b)
+          
+          print()
+          print("=== CSS url() patterns ===")
+          s, hdrs, b = get_with_headers(BASE + "/emag/assets/css/emag-modern.css")
+          urls_in_css = re.findall(r"url\(([^\)]{1,100})\)", b)
+          print(f"url() count: {len(urls_in_css)}")
+          for u in urls_in_css[:30]:
               print(f"  {u}")
+          # Also look for font paths
+          font_refs = re.findall(r"[\w/.-]+\.(?:woff2|woff|ttf|eot|svg)", b)
+          print(f"Font refs: {font_refs[:20]}")
+          # String paths
+          str_paths = re.findall(r"['"](/[a-zA-Z0-9/_.-]{3,60})['""]", b)
+          print(f"String paths: {list(set(str_paths))[:20]}")
           
           print()
-          print("=== Try JS paths with version hash ===")
-          # Version from emag-modern.css?v=107b752
-          version = "107b752"
+          print("=== Git exposure check ===")
           for path in [
-              f"/emag/assets/js/backbone-concat.js?v={version}",
-              f"/emag/assets/js/backbone-concat-{version}.js",
-              "/emag/assets/js/backbone/backbone-concat.js",
-              "/emag/assets/js/app/backbone-concat.js",
-              "/emag/assets/js/secure/backbone-concat.js",
-              "/emag/assets/js/vmg/backbone-concat.js",
-              "/emag/assets/js/emag/vmg-app.js",
-              "/emag/assets/js/vmg-concat.js",
-              "/emag/assets/js/scripts.js",
-              "/emag/assets/js/application.js",
+              "/.git/config",
+              "/.git/HEAD",
+              "/emag/.git/config",
+              "/emag/.git/HEAD",
+              "/.git/COMMIT_EDITMSG",
           ]:
-              s, b = get(BASE + path, maxbytes=200)
+              s, hdrs, b = get_with_headers(BASE + path, maxbytes=500)
               if s == 200:
-                  print(f"[FOUND] {path}: {b[:200]}")
-              else:
-                  print(f"[{s}] {path}")
-          
-          print()
-          print("=== Static asset directory listing ===")
-          for path in [
-              "/emag/assets/js/",
-              "/emag/assets/",
-              "/emag/assets/js/emag/",
-              "/emag/assets/js/vmg/",
-              "/emag/assets/js/app/",
-          ]:
-              s, b = get(BASE + path, maxbytes=2000)
-              is_listing = "Index of" in b or "<a href" in b[:500]
-              if s == 200 and is_listing:
-                  print(f"[LISTING!] {path}: {b[:500]}")
-              elif s != 404:
-                  print(f"[{s}] {path}: {b[:100]}")
+                  print(f"[GIT EXPOSED!] {path}: {b[:300]}")
               else:
                   print(f"[{s}] {path}")
           
