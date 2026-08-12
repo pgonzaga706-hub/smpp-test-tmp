@@ -1,18 +1,18 @@
-name: EMAG Phase 8b
+name: EMAG Phase 9
 on:
   workflow_dispatch:
   push:
     branches: [main]
 
 jobs:
-  phase8b:
+  phase9:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: EMAG Phase 8b
+      - name: EMAG Phase 9
         run: |
           python3 - << 'PYEOF'
-          import urllib.request, urllib.error, json, ssl, time, socket, re
+          import urllib.request, urllib.error, json, ssl, re
           ctx = ssl.create_default_context()
           ctx.check_hostname = False
           ctx.verify_mode = ssl.CERT_NONE
@@ -29,16 +29,32 @@ jobs:
               except Exception as e:
                   return 0, str(e)
           
-          print("=== backbone-concat.js candidates ===")
+          print("=== emag-modern.css - extract all URLs ===")
+          s, b = get(BASE + "/emag/assets/css/emag-modern.css")
+          print(f"Size: {len(b)} chars")
+          # Find all asset URLs
+          url_pat = r"/emag/assets/[a-zA-Z0-9/._-]+"
+          found_urls = list(set(re.findall(url_pat, b)))
+          found_urls.sort()
+          print(f"Asset URLs in CSS ({len(found_urls)}):")
+          for u in found_urls:
+              print(f"  {u}")
+          
+          print()
+          print("=== Try JS paths with version hash ===")
+          # Version from emag-modern.css?v=107b752
+          version = "107b752"
           for path in [
-              "/emag/assets/js/backbone-concat.js",
-              "/emag/assets/js/emag/backbone-concat.js",
-              "/emag/assets/js/concat.js",
-              "/emag/assets/js/all.js",
-              "/emag/assets/js/emag-all.js",
-              "/emag/assets/js/app-concat.js",
-              "/emag/assets/js/vmg-app.js",
-              "/emag/assets/js/emag-app.js",
+              f"/emag/assets/js/backbone-concat.js?v={version}",
+              f"/emag/assets/js/backbone-concat-{version}.js",
+              "/emag/assets/js/backbone/backbone-concat.js",
+              "/emag/assets/js/app/backbone-concat.js",
+              "/emag/assets/js/secure/backbone-concat.js",
+              "/emag/assets/js/vmg/backbone-concat.js",
+              "/emag/assets/js/emag/vmg-app.js",
+              "/emag/assets/js/vmg-concat.js",
+              "/emag/assets/js/scripts.js",
+              "/emag/assets/js/application.js",
           ]:
               s, b = get(BASE + path, maxbytes=200)
               if s == 200:
@@ -47,47 +63,22 @@ jobs:
                   print(f"[{s}] {path}")
           
           print()
-          print("=== CSS analysis ===")
-          s, b = get(BASE + "/emag/assets/css/backbone-concat.css")
-          print(f"backbone-concat.css: {s} {len(b)} chars")
-          js_refs = re.findall(r"[\w-]+\.js", b)
-          print(f"JS refs: {js_refs[:15]}")
-          emag_paths = re.findall(r"/emag/[\w/.-]+", b)
-          print(f"EMAG paths: {list(set(emag_paths))[:20]}")
-          
-          print()
-          s, b = get(BASE + "/emag/assets/css/emag-modern.css")
-          print(f"emag-modern.css: {s} {len(b)} chars")
-          js_refs2 = re.findall(r"[\w-]+\.js", b)
-          print(f"JS refs: {js_refs2[:15]}")
-          emag_paths2 = re.findall(r"/emag/[\w/.-]+", b)
-          print(f"EMAG paths: {list(set(emag_paths2))[:20]}")
-          
-          print()
-          print("=== SMTP probe ===")
-          for host, port in [("69.78.159.216", 25), ("69.78.159.216", 587), ("ess.emag.verizonwireless.com", 25)]:
-              try:
-                  sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                  sock.settimeout(8)
-                  sock.connect((host, port))
-                  banner = sock.recv(1024).decode("utf-8", errors="replace")
-                  print(f"[OPEN] {host}:{port} {banner[:100]}")
-                  sock.close()
-              except Exception as e:
-                  print(f"[{port}] {host}:{port}: {str(e)[:60]}")
-          
-          print()
-          print("=== SNPP probe ===")
-          for host, port in [("69.78.159.216", 444), ("ess.emag.verizonwireless.com", 444)]:
-              try:
-                  sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                  sock.settimeout(5)
-                  sock.connect((host, port))
-                  banner = sock.recv(512).decode("utf-8", errors="replace")
-                  print(f"[OPEN] {host}:{port}: {banner[:80]}")
-                  sock.close()
-              except Exception as e:
-                  print(f"[CLOSED] {host}:{port}: {str(e)[:50]}")
+          print("=== Static asset directory listing ===")
+          for path in [
+              "/emag/assets/js/",
+              "/emag/assets/",
+              "/emag/assets/js/emag/",
+              "/emag/assets/js/vmg/",
+              "/emag/assets/js/app/",
+          ]:
+              s, b = get(BASE + path, maxbytes=2000)
+              is_listing = "Index of" in b or "<a href" in b[:500]
+              if s == 200 and is_listing:
+                  print(f"[LISTING!] {path}: {b[:500]}")
+              elif s != 404:
+                  print(f"[{s}] {path}: {b[:100]}")
+              else:
+                  print(f"[{s}] {path}")
           
           print("DONE")
           PYEOF
