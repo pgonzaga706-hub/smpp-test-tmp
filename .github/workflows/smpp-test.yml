@@ -1,15 +1,15 @@
-name: EMAG Phase 10
+name: EMAG Phase 10b
 on:
   workflow_dispatch:
   push:
     branches: [main]
 
 jobs:
-  phase10:
+  phase10b:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: EMAG Phase 10
+      - name: EMAG Phase 10b
         run: |
           python3 - << 'PYEOF'
           import urllib.request, urllib.error, json, ssl, re
@@ -18,7 +18,7 @@ jobs:
           ctx.verify_mode = ssl.CERT_NONE
           BASE = "https://ess.emag.verizonwireless.com"
           
-          def get_with_headers(url, maxbytes=65536):
+          def fetch(url, maxbytes=65536):
               rq = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
               try:
                   op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
@@ -31,52 +31,50 @@ jobs:
               except Exception as e:
                   return 0, {}, str(e)
           
-          print("=== EMAG main page headers ===")
-          s, hdrs, b = get_with_headers(BASE + "/emag/")
-          for k, v in hdrs.items():
-              if k.lower() in ["content-security-policy", "x-frame-options", "x-content-type-options",
-                               "strict-transport-security", "x-xss-protection", "server",
-                               "x-powered-by", "set-cookie", "content-type"][:]:
-                  print(f"  {k}: {v}")
+          print("=== EMAG headers ===")
+          s, hdrs, b = fetch(BASE + "/emag/")
+          for k, v in sorted(hdrs.items()):
+              kl = k.lower()
+              if kl in ["content-security-policy", "server", "x-powered-by", "set-cookie",
+                        "x-frame-options", "strict-transport-security", "content-type"][:]:
+                  print(f"  {k}: {v[:200]}")
           
           print()
-          print("=== landing.js full content ===")
-          s, hdrs, b = get_with_headers(BASE + "/emag/assets/js/open/landing.js")
-          print(f"Status: {s} Size: {len(b)}")
+          print("=== landing.js ===")
+          s, hdrs, b = fetch(BASE + "/emag/assets/js/open/landing.js")
+          print(f"[{s}] {len(b)} chars")
           print(b)
           
           print()
-          print("=== landing_services.js full content ===")
-          s, hdrs, b = get_with_headers(BASE + "/emag/assets/js/open/landing_services.js")
-          print(f"Status: {s} Size: {len(b)}")
+          print("=== landing_services.js ===")
+          s, hdrs, b = fetch(BASE + "/emag/assets/js/open/landing_services.js")
+          print(f"[{s}] {len(b)} chars")
           print(b)
           
           print()
           print("=== CSS url() patterns ===")
-          s, hdrs, b = get_with_headers(BASE + "/emag/assets/css/emag-modern.css")
-          urls_in_css = re.findall(r"url\(([^\)]{1,100})\)", b)
+          s, hdrs, b = fetch(BASE + "/emag/assets/css/emag-modern.css")
+          # Find url() content - avoid quotes in pattern
+          urls_in_css = re.findall(r"url[(]([^)]{1,100})[)]", b)
           print(f"url() count: {len(urls_in_css)}")
           for u in urls_in_css[:30]:
               print(f"  {u}")
-          # Also look for font paths
-          font_refs = re.findall(r"[\w/.-]+\.(?:woff2|woff|ttf|eot|svg)", b)
+          font_refs = re.findall(r"[a-zA-Z0-9/_.-]+[.](woff2|woff|ttf|eot|svg)", b)
           print(f"Font refs: {font_refs[:20]}")
-          # String paths
-          str_paths = re.findall(r"['"](/[a-zA-Z0-9/_.-]{3,60})['""]", b)
-          print(f"String paths: {list(set(str_paths))[:20]}")
+          slash_paths = re.findall(r"(/[a-zA-Z0-9/_.-]{3,60})", b)
+          print(f"Slash paths in CSS: {list(set(slash_paths))[:30]}")
           
           print()
-          print("=== Git exposure check ===")
+          print("=== Git exposure ===")
           for path in [
               "/.git/config",
               "/.git/HEAD",
               "/emag/.git/config",
               "/emag/.git/HEAD",
-              "/.git/COMMIT_EDITMSG",
           ]:
-              s, hdrs, b = get_with_headers(BASE + path, maxbytes=500)
+              s, hdrs, b = fetch(BASE + path, maxbytes=500)
               if s == 200:
-                  print(f"[GIT EXPOSED!] {path}: {b[:300]}")
+                  print(f"[GIT EXPOSED] {path}: {b[:300]}")
               else:
                   print(f"[{s}] {path}")
           
