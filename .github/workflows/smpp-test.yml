@@ -1,143 +1,105 @@
-name: EMAG Phase 11
+name: EMAG Phase 12
 on:
   workflow_dispatch:
   push:
     branches: [main]
 
 jobs:
-  phase11:
+  phase12:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: EMAG Phase 11
+      - name: EMAG Phase 12
         run: |
           python3 - << 'PYEOF'
-          import urllib.request, urllib.error, json, ssl, socket, subprocess, re
-          ctx = ssl.create_default_context()
-          ctx.check_hostname = False
-          ctx.verify_mode = ssl.CERT_NONE
-          BASE = "https://ess.emag.verizonwireless.com"
+          import socket, smtplib, ssl, subprocess, re, time
           
-          def post_xml(url, xml_body, content_type="text/xml"):
-              data = xml_body.encode("utf-8")
-              rq = urllib.request.Request(url, data=data, method="POST",
-                  headers={"User-Agent": "Mozilla/5.0", "Content-Type": content_type,
-                           "Accept": "text/xml,application/xml,*/*"})
-              try:
-                  op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
-                  with op.open(rq, timeout=15) as r:
-                      return r.status, r.read(2048).decode("utf-8", errors="replace")
-              except urllib.error.HTTPError as e:
-                  return e.code, e.read(1024).decode("utf-8", errors="replace")
-              except Exception as e:
-                  return 0, str(e)
-          
-          def get(url, maxbytes=4096, extra_hdrs=None):
-              hdrs = {"User-Agent": "Mozilla/5.0"}
-              if extra_hdrs:
-                  hdrs.update(extra_hdrs)
-              rq = urllib.request.Request(url, headers=hdrs)
-              try:
-                  op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
-                  with op.open(rq, timeout=10) as r:
-                      return r.status, r.read(maxbytes).decode("utf-8", errors="replace")
-              except urllib.error.HTTPError as e:
-                  return e.code, e.read(512).decode("utf-8", errors="replace")
-              except Exception as e:
-                  return 0, str(e)
-          
-          print("=== WCTP proper XML test ===")
-          wctp_xml = """<?xml version="1.0" encoding="utf-8"?>
-          <!DOCTYPE wctp-Operation SYSTEM "http://dtd.wctp.org/wctp-dtd-v1r1.dtd">
-          <wctp-Operation wctpVersion="WCTP-DTD-V1r1">
-          <wctp-SubmitRequest>
-          <wctp-SubmitHeader submitID="test001" sendResponsesToID="test001">
-          <wctp-Originator senderID="test" securityCode="test"/>
-          <wctp-Recipient recipientID="+12283359820"/>
-          </wctp-SubmitHeader>
-          <wctp-Payload>
-          <wctp-AlphanumericMessage>Test</wctp-AlphanumericMessage>
-          </wctp-Payload>
-          </wctp-SubmitRequest>
-          </wctp-Operation>"""
-          for ct in ["text/xml", "application/xml", "text/xml; charset=utf-8"][:]:
-              s, b = post_xml(BASE + "/emag/wctp", wctp_xml, ct)
-              print(f"[WCTP {ct}] {s}: {b[:300]}")
+          print("=== MX lookup vtext.com/vzwpix.com ===")
+          for dom in ["vtext.com", "vzwpix.com"][:]:
+              r = subprocess.run(["host", "-t", "MX", dom], capture_output=True, text=True, timeout=10)
+              print(f"{dom}: {r.stdout.strip()[:200]}")
           
           print()
-          print("=== API endpoint discovery ===")
-          for path in [
-              "/emag/api/xml",
-              "/emag/api/v1/messages",
-              "/emag/api/v2/messages",
-              "/emag/api/messages/send",
-              "/emag/api/send",
-              "/emag/api/sms",
-              "/emag/api/submit",
-              "/emag/api/wctp",
-              "/emag/wctp/submit",
-              "/emag/servlet/",
-              "/emag/service/",
-              "/emag/services/",
-              "/emag/ws/",
-              "/emag/rest/",
-          ]:
-              s, b = get(BASE + path)
-              if s not in (404,):
-                  print(f"[{s}] {path}: {b[:200]}")
+          print("=== Direct SMTP to vtext.com MX ===")
+          try:
+              r = subprocess.run(["host", "-t", "MX", "vtext.com"], capture_output=True, text=True, timeout=10)
+              out = r.stdout.strip()
+              print("MX raw:", out[:200])
+              mx_m = re.search(r"handled by [0-9]+ ([a-zA-Z0-9.-]+)", out)
+              if mx_m:
+                  mx_host = mx_m.group(1).rstrip(".")
+                  mx_ip = socket.gethostbyname(mx_host)
+                  print(f"MX host={mx_host} ip={mx_ip}")
+                  sock = socket.socket()
+                  sock.settimeout(15)
+                  sock.connect((mx_ip, 25))
+                  print("Banner:", sock.recv(1024).decode(errors="replace")[:100])
+                  def cmd(s, c):
+                      s.sendall((c + "\r\n").encode())
+                      time.sleep(0.4)
+                      return s.recv(4096).decode(errors="replace")
+                  print("EHLO:", cmd(sock, "EHLO gha.test.local"))
+                  r1 = cmd(sock, "MAIL FROM:<pentest@gha.test.local>")
+                  print("MAIL FROM:", r1)
+                  if r1[:1] == "2":
+                      n1 = "+12283359820@vtext.com"
+                      n2 = "+18173305720@vtext.com"
+                      r2 = cmd(sock, f"RCPT TO:<{n1}>")
+                      print("RCPT1:", r2[:80])
+                      r3 = cmd(sock, f"RCPT TO:<{n2}>")
+                      print("RCPT2:", r3[:80])
+                      if r2[:1] == "2" or r3[:1] == "2":
+                          cmd(sock, "DATA")
+                          body = "Subject: GHA EMAG Test\r\n\r\nAuthorized pentest test via email-to-SMS"
+                          r4 = cmd(sock, body + "\r\n.")
+                          print("DATA:", r4[:100])
+                  sock.close()
               else:
-                  print(f"[{s}] {path}")
+                  print("No MX found")
+          except Exception as ex:
+              print(f"Error: {ex}")
           
           print()
-          print("=== DNS discovery for EMAG sub-services ===")
-          hostnames = [
-              "smtp.emag.verizonwireless.com",
-              "smpp.emag.verizonwireless.com",
-              "snpp.emag.verizonwireless.com",
-              "mail.emag.verizonwireless.com",
-              "api.emag.verizonwireless.com",
-              "emag-smtp.verizonwireless.com",
-              "emag-api.verizonwireless.com",
-              "emag.vzwcorp.com",
-              "smtp.vzwcorp.com",
+          print("=== DNS: more EMAG SMTP variants ===")
+          hosts2 = [
+              "vmg.verizonwireless.com",
+              "vmg-smtp.verizonwireless.com",
+              "b2bsms.verizonwireless.com",
+              "sms.verizonwireless.com",
+              "ess.verizonwireless.com",
+              "emag.verizonenterprise.com",
+              "smtp.verizonenterprise.com",
+              "b2b.verizonenterprise.com",
+              "smpp.verizonenterprise.com",
+              "gateway.verizonenterprise.com",
           ]
-          for h in hostnames:
+          for h in hosts2:
               try:
                   ip = socket.gethostbyname(h)
                   print(f"[RESOLVED] {h} -> {ip}")
-              except Exception as e:
+              except:
                   print(f"[NXDOMAIN] {h}")
           
           print()
-          print("=== SMTP to vtext.com (email-to-SMS) ===")
-          import smtplib
-          # Try Gmail SMTP to send to vtext.com
-          try:
-              smtp = smtplib.SMTP("smtp.gmail.com", 587, timeout=10)
-              smtp.ehlo()
-              banner = "connected"
-              smtp.quit()
-              print(f"Gmail SMTP 587: {banner}")
-          except Exception as e:
-              print(f"Gmail SMTP 587: {e}")
-          
-          print()
-          print("=== OPTIONS on API endpoints ===")
-          for path in ["/emag/api/messages", "/emag/api/reports", "/emag/wctp"][:]:
-              rq = urllib.request.Request(BASE + path, method="OPTIONS",
-                  headers={"User-Agent": "Mozilla/5.0", "Origin": "https://ess.emag.verizonwireless.com",
-                           "Access-Control-Request-Method": "POST"})
+          print("=== Outbound SMTP port tests ===")
+          smtp_tests = [
+              ("smtp.gmail.com", 25),
+              ("smtp.gmail.com", 587),
+              ("aspmx.l.google.com", 25),
+              ("alt1.aspmx.l.google.com", 25),
+              ("smtp.sendgrid.net", 25),
+              ("smtp.sendgrid.net", 587),
+          ]
+          for host, port in smtp_tests:
               try:
-                  op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
-                  with op.open(rq, timeout=10) as r:
-                      ah = r.headers.get("Allow", "")
-                      cors = r.headers.get("Access-Control-Allow-Methods", "")
-                      print(f"[{r.status}] {path} Allow={ah} CORS={cors}")
-              except urllib.error.HTTPError as e:
-                  ah = e.headers.get("Allow", "")
-                  print(f"[{e.code}] {path} Allow={ah}")
+                  s = socket.socket()
+                  s.settimeout(6)
+                  s.connect((host, port))
+                  bn = s.recv(512).decode(errors="replace")
+                  print(f"[OPEN] {host}:{port}: {bn[:80]}")
+                  s.close()
               except Exception as e:
-                  print(f"[ERR] {path}: {e}")
+                  print(f"[CLOSED] {host}:{port}: {str(e)[:60]}")
           
           print("DONE")
           PYEOF
