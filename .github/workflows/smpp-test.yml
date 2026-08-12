@@ -1,39 +1,35 @@
-name: EMAG Phase 8
+name: EMAG Phase 8b
 on:
   workflow_dispatch:
   push:
     branches: [main]
 
 jobs:
-  phase8:
+  phase8b:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: EMAG Phase 8
+      - name: EMAG Phase 8b
         run: |
           python3 - << 'PYEOF'
-          import urllib.request, urllib.error, json, ssl, time, socket, smtplib
+          import urllib.request, urllib.error, json, ssl, time, socket, re
           ctx = ssl.create_default_context()
           ctx.check_hostname = False
           ctx.verify_mode = ssl.CERT_NONE
           BASE = "https://ess.emag.verizonwireless.com"
           
-          def get(url, headers=None, maxbytes=65536):
-              h = {"User-Agent": "Mozilla/5.0"}
-              if headers: h.update(headers)
-              rq = urllib.request.Request(url, headers=h)
+          def get(url, maxbytes=65536):
+              rq = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
               try:
                   op = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
                   with op.open(rq, timeout=15) as r:
-                      ct = r.headers.get("Content-Type","")
-                      rb = r.read(maxbytes).decode("utf-8", errors="replace")
-                      return r.status, ct, rb
+                      return r.status, r.read(maxbytes).decode("utf-8", errors="replace")
               except urllib.error.HTTPError as e:
-                  return e.code, "", e.read(512).decode("utf-8", errors="replace")
+                  return e.code, e.read(512).decode("utf-8", errors="replace")
               except Exception as e:
-                  return 0, "", str(e)
+                  return 0, str(e)
           
-          print("=== backbone-concat.js (main SPA) ===")
+          print("=== backbone-concat.js candidates ===")
           for path in [
               "/emag/assets/js/backbone-concat.js",
               "/emag/assets/js/emag/backbone-concat.js",
@@ -41,45 +37,48 @@ jobs:
               "/emag/assets/js/all.js",
               "/emag/assets/js/emag-all.js",
               "/emag/assets/js/app-concat.js",
+              "/emag/assets/js/vmg-app.js",
+              "/emag/assets/js/emag-app.js",
           ]:
-              s, ct, b = get(BASE + path, maxbytes=500)
+              s, b = get(BASE + path, maxbytes=200)
               if s == 200:
-                  print(f"[{s}] FOUND! {path} ({len(b)} chars): {b[:300]}")
+                  print(f"[FOUND] {path}: {b[:200]}")
               else:
                   print(f"[{s}] {path}")
           
           print()
-          print("=== CSS analysis for JS paths ===")
-          s, ct, b = get(BASE + "/emag/assets/css/backbone-concat.css", maxbytes=65536)
-          print(f"[{s}] backbone-concat.css {len(b)} chars")
-          import re
-          urls = re.findall(r"url\(["\x27]?([^\)"\x27]+)["\x27]?\)", b)
+          print("=== CSS analysis ===")
+          s, b = get(BASE + "/emag/assets/css/backbone-concat.css")
+          print(f"backbone-concat.css: {s} {len(b)} chars")
           js_refs = re.findall(r"[\w-]+\.js", b)
-          print(f"CSS URLs: {urls[:10]}")
-          print(f"JS refs in CSS: {js_refs[:10]}")
+          print(f"JS refs: {js_refs[:15]}")
+          emag_paths = re.findall(r"/emag/[\w/.-]+", b)
+          print(f"EMAG paths: {list(set(emag_paths))[:20]}")
           
           print()
-          print("=== SMTP probe (email-to-SMS) ===")
-          smtp_targets = [
-              ("69.78.159.216", 25),
-              ("69.78.159.216", 465),
-              ("69.78.159.216", 587),
-              ("ess.emag.verizonwireless.com", 25),
-          ]
-          for host, port in smtp_targets:
+          s, b = get(BASE + "/emag/assets/css/emag-modern.css")
+          print(f"emag-modern.css: {s} {len(b)} chars")
+          js_refs2 = re.findall(r"[\w-]+\.js", b)
+          print(f"JS refs: {js_refs2[:15]}")
+          emag_paths2 = re.findall(r"/emag/[\w/.-]+", b)
+          print(f"EMAG paths: {list(set(emag_paths2))[:20]}")
+          
+          print()
+          print("=== SMTP probe ===")
+          for host, port in [("69.78.159.216", 25), ("69.78.159.216", 587), ("ess.emag.verizonwireless.com", 25)]:
               try:
                   sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                   sock.settimeout(8)
                   sock.connect((host, port))
                   banner = sock.recv(1024).decode("utf-8", errors="replace")
-                  print(f"[OPEN] {host}:{port} banner: {banner[:100]}")
+                  print(f"[OPEN] {host}:{port} {banner[:100]}")
                   sock.close()
               except Exception as e:
                   print(f"[{port}] {host}:{port}: {str(e)[:60]}")
           
           print()
-          print("=== SNPP probe (port 444) ===")
-          for host, port in [("69.78.159.216", 444), ("69.78.159.216", 7777), ("69.78.159.216", 9000)]:
+          print("=== SNPP probe ===")
+          for host, port in [("69.78.159.216", 444), ("ess.emag.verizonwireless.com", 444)]:
               try:
                   sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                   sock.settimeout(5)
@@ -89,13 +88,6 @@ jobs:
                   sock.close()
               except Exception as e:
                   print(f"[CLOSED] {host}:{port}: {str(e)[:50]}")
-          
-          print()
-          print("=== EMAG API path discovery via CSS ===")
-          s, ct, b = get(BASE + "/emag/assets/css/emag-modern.css", maxbytes=65536)
-          print(f"[{s}] emag-modern.css {len(b)} chars")
-          api_candidates = re.findall(r"/emag/[\w/.-]+", b)
-          print(f"Paths in CSS: {list(set(api_candidates))[:20]}")
           
           print("DONE")
           PYEOF
